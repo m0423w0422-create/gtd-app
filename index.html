@@ -65,9 +65,8 @@ const daysUntil = s => {
 const makeTask = (o={}) => ({
   id:gid(),text:"",category:"inbox",done:false,
   createdAt:Date.now(),doneAt:null,dueDate:null,memo:"",
-  isNextAction:false,contexts:[],projectId:null,waitingFor:"",
-  clarified:true,
-  phoneNumber:"",phoneNote:"",
+  contexts:[],projectId:null,
+  phoneTo:"",phoneNumber:"",phoneNote:"",
   reminderSet:false,reminderDate:null,reminderHour:null,reminderMin:null,
   ...o
 });
@@ -78,7 +77,7 @@ const makeHabit = (o={}) => ({id:gid(),text:"",category:"work",days:[1,2,3,4,5],
 const load = (k,fb) => {try{const v=localStorage.getItem(k);return v?JSON.parse(v):fb}catch{return fb}};
 const save = (k,v) => {try{localStorage.setItem(k,JSON.stringify(v))}catch{}};
 const migrateProjects = ps => ps.map(p=>({category:"work",collapsed:false,...p}));
-const migrateTasks = ts => ts.map(t=>({waitingFor:"",clarified:true,doneAt:null,phoneNumber:"",phoneNote:"",reminderSet:false,reminderDate:null,reminderHour:null,reminderMin:null,...t}));
+const migrateTasks = ts => ts.map(t=>({doneAt:null,contexts:t.contexts||[],phoneTo:"",phoneNumber:"",phoneNote:"",reminderSet:false,reminderDate:null,reminderHour:null,reminderMin:null,...t}));
 
 // ── Defaults ───────────────────────────────────────────────────
 const DEF_TASKS = () => [
@@ -1011,59 +1010,50 @@ function TaskRow({task,tasks,projects,openPanel,setOpenPanel,upd,del,togCtx,comp
           borderTop:"1px solid #F3F4F6",borderRadius:"0 0 11px 11px",
           padding:"14px 15px",marginBottom:compact?6:8}}>
 
-          {/* 2分 */}
-          <div style={{background:"#FFFBEB",border:"1px solid #FDE68A",borderRadius:8,
-            padding:"8px 12px",marginBottom:13,display:"flex",
-            alignItems:"center",justifyContent:"space-between"}}>
-            <span style={{fontSize:12,color:"#92400E"}}>⏱ 2分以内で終わる？</span>
-            <button onClick={()=>{completeTask(task.id);setOpenPanel(null);}}
-              style={{background:"#F59E0B",color:"#fff",border:"none",borderRadius:6,
-                padding:"4px 12px",fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>
-              今すぐやる ✓
-            </button>
-          </div>
-
-          {/* Next action */}
+          {/* 電話 */}
           <div style={{marginBottom:13}}>
-            <SL>次のアクション</SL>
-            <button onClick={()=>upd(task.id,{isNextAction:!task.isNextAction})}
+            <SL>電話タスク</SL>
+            <button onClick={()=>togCtx(task.id,"phone")}
               style={{display:"flex",alignItems:"center",gap:7,padding:"7px 14px",
                 borderRadius:8,border:"1.5px solid",
-                borderColor:task.isNextAction?"#F59E0B":"#E5E7EB",
-                background:task.isNextAction?"#FFFBEB":"#fff",
-                color:task.isNextAction?"#92400E":"#9CA3AF",
-                fontSize:13,fontWeight:task.isNextAction?700:500,
+                borderColor:task.contexts.includes("phone")?"#2563EB":"#E5E7EB",
+                background:task.contexts.includes("phone")?"#EFF6FF":"#fff",
+                color:task.contexts.includes("phone")?"#2563EB":"#9CA3AF",
+                fontSize:13,fontWeight:task.contexts.includes("phone")?700:500,
                 cursor:"pointer",fontFamily:"inherit"}}>
-              <span>⚡</span>
-              <span>{task.isNextAction?"次のアクションに設定済み":"次のアクションに設定する"}</span>
+              <span>📞</span>
+              <span>{task.contexts.includes("phone")?"電話タスクに設定済み":"電話タスクとして設定"}</span>
             </button>
+            {task.contexts.includes("phone")&&(
+              <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:7}}>
+                <input value={task.phoneTo||""}
+                  onChange={e=>upd(task.id,{phoneTo:e.target.value})}
+                  placeholder="宛先（会社名・担当者名）"
+                  style={{width:"100%",border:"1.5px solid #E5E7EB",borderRadius:8,
+                    padding:"8px 10px",fontSize:13,fontFamily:"inherit",color:"#1C1C1E",
+                    background:"#FAFAFA",outline:"none",boxSizing:"border-box"}}
+                  onFocus={e=>e.target.style.borderColor="#1C1C1E"}
+                  onBlur={e=>e.target.style.borderColor="#E5E7EB"}/>
+                <input value={task.phoneNumber||""}
+                  onChange={e=>upd(task.id,{phoneNumber:e.target.value})}
+                  placeholder="電話番号"
+                  type="tel"
+                  style={{width:"100%",border:"1.5px solid #E5E7EB",borderRadius:8,
+                    padding:"8px 10px",fontSize:13,fontFamily:"inherit",color:"#1C1C1E",
+                    background:"#FAFAFA",outline:"none",boxSizing:"border-box"}}
+                  onFocus={e=>e.target.style.borderColor="#1C1C1E"}
+                  onBlur={e=>e.target.style.borderColor="#E5E7EB"}/>
+                <input value={task.phoneNote||""}
+                  onChange={e=>upd(task.id,{phoneNote:e.target.value})}
+                  placeholder="用件"
+                  style={{width:"100%",border:"1.5px solid #E5E7EB",borderRadius:8,
+                    padding:"8px 10px",fontSize:13,fontFamily:"inherit",color:"#1C1C1E",
+                    background:"#FAFAFA",outline:"none",boxSizing:"border-box"}}
+                  onFocus={e=>e.target.style.borderColor="#1C1C1E"}
+                  onBlur={e=>e.target.style.borderColor="#E5E7EB"}/>
+              </div>
+            )}
           </div>
-
-          {/* Context */}
-          <div style={{marginBottom:13}}>
-            <SL>コンテキスト</SL>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              {CONTEXTS.map(ctx=>(
-                <Tag key={ctx.key} color="#6B7280" active={task.contexts.includes(ctx.key)}
-                  onClick={()=>togCtx(task.id,ctx.key)}>{ctx.icon} {ctx.label}</Tag>
-              ))}
-            </div>
-          </div>
-
-          {/* Waiting for */}
-          {task.contexts.includes("wait")&&(
-            <div style={{marginBottom:13}}>
-              <SL>誰を待っている？</SL>
-              <input value={task.waitingFor||""}
-                onChange={e=>upd(task.id,{waitingFor:e.target.value})}
-                placeholder="例：松村さんの返信"
-                style={{width:"100%",border:"1.5px solid #E5E7EB",borderRadius:8,
-                  padding:"8px 10px",fontSize:13,fontFamily:"inherit",color:"#1C1C1E",
-                  background:"#FAFAFA",outline:"none"}}
-                onFocus={e=>e.target.style.borderColor="#1C1C1E"}
-                onBlur={e=>e.target.style.borderColor="#E5E7EB"}/>
-            </div>
-          )}
 
           {/* Memo */}
           <div style={{marginBottom:13}}>
@@ -1078,6 +1068,9 @@ function TaskRow({task,tasks,projects,openPanel,setOpenPanel,upd,del,togCtx,comp
               onFocus={e=>e.target.style.borderColor="#1C1C1E"}
               onBlur={e=>e.target.style.borderColor="#E5E7EB"}/>
           </div>
+
+          {/* リマインダー */}
+          <ReminderSection task={task} upd={upd}/>
 
           {/* Due date */}
           <div style={{marginBottom:13}}>
