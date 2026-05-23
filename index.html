@@ -48,10 +48,7 @@ const CATEGORIES = {
   someday: {label:"いつかやる",   color:"#9333EA",icon:"🌙"},
 };
 const CONTEXTS = [
-  {key:"pc",   label:"PC",  icon:"💻"},
   {key:"phone",label:"電話",icon:"📞"},
-  {key:"out",  label:"外出",icon:"🚶"},
-  {key:"wait", label:"待ち",icon:"⏳"},
 ];
 const DOW = ["日","月","火","水","木","金","土"];
 const CONFETTI_COLORS = ["#F59E0B","#2563EB","#16A34A","#EF4444","#9333EA","#EC4899","#06B6D4","#F97316","#84CC16","#0EA5E9"];
@@ -69,7 +66,9 @@ const makeTask = (o={}) => ({
   id:gid(),text:"",category:"inbox",done:false,
   createdAt:Date.now(),doneAt:null,dueDate:null,memo:"",
   isNextAction:false,contexts:[],projectId:null,waitingFor:"",
-  clarified:false, // GTD: 仕分け済みか
+  clarified:true,
+  phoneNumber:"",phoneNote:"",
+  reminderSet:false,reminderDate:null,reminderHour:null,reminderMin:null,
   ...o
 });
 const makeProj = (name,category="work") => ({id:gid(),name,category,createdAt:Date.now(),collapsed:false});
@@ -79,7 +78,7 @@ const makeHabit = (o={}) => ({id:gid(),text:"",category:"work",days:[1,2,3,4,5],
 const load = (k,fb) => {try{const v=localStorage.getItem(k);return v?JSON.parse(v):fb}catch{return fb}};
 const save = (k,v) => {try{localStorage.setItem(k,JSON.stringify(v))}catch{}};
 const migrateProjects = ps => ps.map(p=>({category:"work",collapsed:false,...p}));
-const migrateTasks = ts => ts.map(t=>({waitingFor:"",clarified:true,doneAt:null,...t}));
+const migrateTasks = ts => ts.map(t=>({waitingFor:"",clarified:true,doneAt:null,phoneNumber:"",phoneNote:"",reminderSet:false,reminderDate:null,reminderHour:null,reminderMin:null,...t}));
 
 // ── Defaults ───────────────────────────────────────────────────
 const DEF_TASKS = () => [
@@ -245,7 +244,7 @@ function App() {
   const [projModal,  setProjModal]  = useState(null);
   const [newProjName,setNewProjName]= useState("");
   const [newProjCat, setNewProjCat] = useState("work");
-  const [clarifyTask,setClarifyTask]= useState(null); // GTD仕分けフロー
+
   const [weeklyReview,setWeeklyReview]=useState(false);
   const [focusMode,  setFocusMode]  = useState(false);
   const [confetti,   setConfetti]   = useState(false);
@@ -310,8 +309,7 @@ function App() {
     const t=makeTask({text});
     setTasks(p=>[t,...p]);
     setInput(""); inputRef.current?.focus();
-    // キャプチャ後に仕分けフローを促す
-    setTimeout(()=>setClarifyTask(t.id),300);
+    // 仕分けフローなし（受信箱へ直行）
   };
 
   const completeTask = (id) => {
@@ -388,14 +386,11 @@ function App() {
   // ── Derived ──
   const activeTasks     = tasks.filter(t=>!t.done);
   const inboxCount      = activeTasks.filter(t=>t.category==="inbox").length;
-  const unclarifiedCount= activeTasks.filter(t=>!t.clarified).length;
-  const nextTasks       = activeTasks.filter(t=>t.isNextAction);
-  const nextCount       = nextTasks.length;
-  const waitingTasks    = activeTasks.filter(t=>t.contexts.includes("wait"));
+  const inboxOldCount   = activeTasks.filter(t=>t.category==="inbox"&&(Date.now()-t.createdAt)>86400000).length;
+  const waitingTasks    = activeTasks.filter(t=>t.contexts.includes("phone"));
   const somedayCount    = activeTasks.filter(t=>t.category==="someday").length;
   const todayDone       = tasks.filter(t=>t.done&&t.doneAt&&t.doneAt>new Date(todayStr()+"T00:00:00").getTime()).length;
 
-  const focusTasks = nextTasks.slice(0,5); // デイリーフォーカス上位5件
 
   const navItems = [
     {key:"focus",   label:"Today",      icon:"🎯", count:null},
@@ -494,19 +489,7 @@ function App() {
         <DailySchedule tasks={tasks} completeTask={taskProps.completeTask} upd={upd}/>
       )}
 
-      {/* ── WAITING VIEW ── */}
-      {view==="waiting"&&(
-        <div style={{maxWidth:580,margin:"0 auto",padding:"14px 20px 80px"}}>
-          <div style={{fontSize:12,color:"#9CA3AF",marginBottom:12,lineHeight:1.6}}>
-            誰かに依頼して返事待ちのタスク。「待ち」コンテキストが付いたものが表示されます。
-          </div>
-          {waitingTasks.length===0?(
-            <div style={{textAlign:"center",color:"#C4C7CD",fontSize:13,padding:"40px 0"}}>待ちタスクはありません</div>
-          ):waitingTasks.map(task=>(
-            <TaskRow key={task.id} task={task} {...taskProps}/>
-          ))}
-        </div>
-      )}
+
 
       {/* ── PROJECT VIEW ── */}
       {view==="project"&&(
@@ -661,9 +644,24 @@ function App() {
       {/* ── OTHER TASK VIEWS ── */}
       {(view==="inbox"||view==="someday")&&(
         <div style={{maxWidth:580,margin:"0 auto",padding:"12px 20px 80px"}}>
+          {view==="inbox"&&inboxOldCount>0&&(
+            <div style={{background:"#FEF2F2",border:"1.5px solid #FCA5A5",
+              borderRadius:10,padding:"10px 14px",marginBottom:12,
+              display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:16}}>⚠️</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:700,color:"#EF4444"}}>
+                  {inboxOldCount}件が24時間以上未処理です
+                </div>
+                <div style={{fontSize:11,color:"#9CA3AF",marginTop:1}}>
+                  仕分けが必要なタスクがあります
+                </div>
+              </div>
+            </div>
+          )}
           {visible.length===0?(
             <div style={{textAlign:"center",color:"#C4C7CD",fontSize:13,padding:"40px 0"}}>
-              {view==="next"?"次のアクションはありません":"タスクはありません"}
+              タスクはありません
             </div>
           ):visible.map(task=>(<TaskRow key={task.id} task={task} {...taskProps}/>))}
         </div>
@@ -739,14 +737,7 @@ function App() {
         <CalendarView tasks={tasks} onSelectDate={(d)=>{setCalDate(d);}} selectedDate={calDate}/>
       )}
 
-      {/* ── GTD Clarify Modal ── */}
-      {clarifyTask&&<ClarifyModal
-        task={tasks.find(t=>t.id===clarifyTask)}
-        projects={projects}
-        onDone={(patch)=>{upd(clarifyTask,{...patch,clarified:true});setClarifyTask(null);}}
-        onSkip={()=>setClarifyTask(null)}
-        onTwoMin={()=>{completeTask(clarifyTask);setClarifyTask(null);}}
-      />}
+
 
       {/* ── Habit Modal ── */}
       {habitModal&&<HabitModal
@@ -980,6 +971,11 @@ function TaskRow({task,tasks,projects,openPanel,setOpenPanel,upd,del,togCtx,comp
             {!task.clarified&&<span style={{fontSize:10,color:"#EF4444",
               background:"#FEF2F2",borderRadius:4,padding:"1px 5px"}}>未仕分け</span>}
             <span>{task.text}</span>
+            {task.category==="inbox"&&!task.done&&(Date.now()-task.createdAt)>86400000&&(
+              <span style={{fontSize:9,fontWeight:700,color:"#EF4444",
+                background:"#FEF2F2",borderRadius:4,padding:"1px 6px",
+                flexShrink:0,whiteSpace:"nowrap"}}>未処理</span>
+            )}
           </div>
           {task.waitingFor&&!isOpen&&(
             <div style={{fontSize:11,color:"#9CA3AF",marginTop:2}}>⏳ {task.waitingFor}待ち</div>
@@ -1185,6 +1181,13 @@ function DailySchedule({tasks, completeTask, upd}) {
       Notification.requestPermission();
     }
   },[]);
+
+  // リマインダーチェック（1分ごと）
+  useEffect(()=>{
+    checkReminders(tasks);
+    const t=setInterval(()=>checkReminders(tasks),60000);
+    return ()=>clearInterval(t);
+  },[tasks]);
 
   // 通知スケジューラー：1分ごとにチェック
   useEffect(()=>{
@@ -1566,7 +1569,7 @@ function DailySchedule({tasks, completeTask, upd}) {
       )}
 
       {/* デイリーメモ */}
-      <div style={{marginTop:8}}>
+      <div style={{marginTop:8,marginBottom:20}}>
         <div style={{fontSize:11,color:"#9CA3AF",letterSpacing:"0.08em",
           textTransform:"uppercase",marginBottom:7}}>デイリーメモ</div>
         <textarea value={dayMemo} onChange={e=>setDayMemo(e.target.value)}
@@ -1580,10 +1583,102 @@ function DailySchedule({tasks, completeTask, upd}) {
           onFocus={e=>e.target.style.borderColor="#1C1C1E"}
           onBlur={e=>e.target.style.borderColor="#E5E7EB"}/>
       </div>
+
+      {/* 今日の期日タスク一覧 */}
+      {(()=>{
+        const todayTasks = tasks.filter(t=>!t.done&&t.dueDate===schedDate);
+        if(todayTasks.length===0) return null;
+        return (
+          <div>
+            <div style={{fontSize:11,color:"#9CA3AF",letterSpacing:"0.08em",
+              textTransform:"uppercase",marginBottom:8}}>
+              この日の期日タスク（{todayTasks.length}件）
+            </div>
+            {todayTasks.map(t=>(
+              <div key={t.id} style={{background:"#fff",border:"1.5px solid",
+                borderColor:daysUntil(t.dueDate)<0?"#FCA5A5":"#E5E7EB",
+                borderRadius:10,padding:"10px 13px",marginBottom:6,
+                display:"flex",alignItems:"center",gap:9}}>
+                <button onClick={()=>completeTask(t.id)}
+                  style={{width:20,height:20,borderRadius:6,border:"1.5px solid",
+                    borderColor:CATEGORIES[t.category].color,background:"transparent",
+                    cursor:"pointer",flexShrink:0}}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {t.text}
+                  </div>
+                  <div style={{display:"flex",gap:5,marginTop:2,alignItems:"center"}}>
+                    <span style={{fontSize:10,fontWeight:600,
+                      color:CATEGORIES[t.category].color,
+                      background:CATEGORIES[t.category].color+"18",
+                      borderRadius:4,padding:"1px 5px"}}>
+                      {CATEGORIES[t.category].icon} {CATEGORIES[t.category].label}
+                    </span>
+                    {t.reminderSet&&t.reminderDate&&(
+                      <span style={{fontSize:10,color:"#2563EB"}}>
+                        🔔 {t.reminderHour}:{String(t.reminderMin).padStart(2,"0")}
+                      </span>
+                    )}
+                    <DueBadge dueDate={t.dueDate}/>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
     </div>
   );
 }
 
+
+
+// ── CalSummaryBlock ────────────────────────────────────────────
+function CalSummaryBlock({label, count, tasks, color}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{marginBottom:8}}>
+      <div onClick={()=>setOpen(v=>!v)}
+        style={{background:"#fff",border:"1.5px solid",
+          borderColor:open?color:"#E5E7EB",
+          borderRadius:open?"11px 11px 0 0":11,
+          padding:"11px 14px",cursor:"pointer",
+          display:"flex",alignItems:"center",gap:10,
+          transition:"all 0.15s"}}>
+        <div style={{flex:1}}>
+          <span style={{fontSize:14,fontWeight:700,color:open?color:"#1C1C1E"}}>{label}</span>
+        </div>
+        <span style={{fontSize:14,fontWeight:800,color}}>{count}</span>
+        <span style={{color:"#D1D5DB",fontSize:14,transition:"transform 0.2s",
+          display:"inline-block",transform:open?"rotate(90deg)":"none"}}>›</span>
+      </div>
+      {open&&(
+        <div className="fadein" style={{background:"#fff",
+          border:"1.5px solid",borderColor:color,
+          borderTop:"none",borderRadius:"0 0 11px 11px",
+          padding:"8px 14px 12px"}}>
+          {tasks.map(t=>(
+            <div key={t.id} style={{padding:"7px 0",
+              borderTop:"1px solid #F3F4F6",
+              display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:10,fontWeight:600,
+                color:CATEGORIES[t.category].color,
+                background:CATEGORIES[t.category].color+"18",
+                borderRadius:4,padding:"1px 5px",flexShrink:0}}>
+                {CATEGORIES[t.category].icon}
+              </span>
+              <span style={{flex:1,fontSize:13,color:"#1C1C1E",
+                overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                {t.text}
+              </span>
+              <DueBadge dueDate={t.dueDate}/>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── CalendarView ───────────────────────────────────────────────
 function CalendarView({tasks, onSelectDate, selectedDate}) {
@@ -1718,36 +1813,150 @@ function CalendarView({tasks, onSelectDate, selectedDate}) {
         </div>
       )}
 
-      {/* 今月の期日ありタスク数サマリー */}
+      {/* 今月の期日サマリー（折りたたみ） */}
       {(()=>{
         const prefix = `${curYear}-${String(curMonth+1).padStart(2,"0")}`;
         const monthTasks = tasks.filter(t=>!t.done&&t.dueDate&&t.dueDate.startsWith(prefix));
-        const overdueCount = monthTasks.filter(t=>daysUntil(t.dueDate)<0).length;
+        const overdueTasks = monthTasks.filter(t=>daysUntil(t.dueDate)<0);
         if(monthTasks.length===0) return null;
         return (
-          <div style={{marginTop:16,background:"#F9F8F6",borderRadius:10,
-            padding:"10px 14px",display:"flex",gap:16}}>
-            <div style={{textAlign:"center"}}>
-              <div style={{fontSize:18,fontWeight:800}}>{monthTasks.length}</div>
-              <div style={{fontSize:10,color:"#9CA3AF"}}>今月の期日</div>
-            </div>
-            {overdueCount>0&&(
-              <div style={{textAlign:"center"}}>
-                <div style={{fontSize:18,fontWeight:800,color:"#EF4444"}}>{overdueCount}</div>
-                <div style={{fontSize:10,color:"#9CA3AF"}}>超過中</div>
-              </div>
+          <div style={{marginTop:16}}>
+            <CalSummaryBlock
+              label="今月の期日" count={monthTasks.length}
+              tasks={monthTasks} color="#1C1C1E"/>
+            {overdueTasks.length>0&&(
+              <CalSummaryBlock
+                label="期限超過" count={overdueTasks.length}
+                tasks={overdueTasks} color="#EF4444"/>
             )}
-            <div style={{textAlign:"center"}}>
-              <div style={{fontSize:18,fontWeight:800,color:"#F59E0B"}}>
-                {monthTasks.filter(t=>t.isNextAction).length}
-              </div>
-              <div style={{fontSize:10,color:"#9CA3AF"}}>次のアクション</div>
-            </div>
           </div>
         );
       })()}
     </div>
   );
+}
+
+
+// ── ReminderSection ────────────────────────────────────────────
+function ReminderSection({task, upd}) {
+  const [showPicker, setShowPicker] = useState(false);
+  const [rDate, setRDate] = useState(task.reminderDate || todayStr());
+  const [rHour, setRHour] = useState(task.reminderHour ?? 9);
+  const [rMin,  setRMin]  = useState(task.reminderMin  ?? 0);
+
+  const save = () => {
+    upd(task.id, {reminderDate:rDate, reminderHour:rHour, reminderMin:rMin, reminderSet:true});
+    // 通知をスケジュール
+    scheduleReminder(task.id, task.text, rDate, rHour, rMin);
+    setShowPicker(false);
+  };
+  const clear = () => {
+    upd(task.id, {reminderDate:null, reminderHour:null, reminderMin:null, reminderSet:false});
+    localStorage.removeItem("reminder_"+task.id);
+    setShowPicker(false);
+  };
+
+  const hasReminder = task.reminderSet && task.reminderDate;
+  const reminderStr = hasReminder
+    ? `${task.reminderDate} ${task.reminderHour}:${String(task.reminderMin).padStart(2,"0")}`
+    : null;
+
+  return (
+    <div style={{marginBottom:13}}>
+      <SL>リマインダー</SL>
+      {hasReminder&&!showPicker&&(
+        <div style={{background:"#EFF6FF",border:"1.5px solid #BFDBFE",borderRadius:8,
+          padding:"8px 12px",marginBottom:7,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div>
+            <div style={{fontSize:12,fontWeight:700,color:"#2563EB"}}>🔔 {reminderStr}</div>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>setShowPicker(true)}
+              style={{background:"transparent",border:"none",color:"#2563EB",
+                fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>変更</button>
+            <button onClick={clear}
+              style={{background:"transparent",border:"none",color:"#9CA3AF",
+                fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+          </div>
+        </div>
+      )}
+      {!showPicker&&(
+        <button onClick={()=>setShowPicker(true)}
+          style={{display:"flex",alignItems:"center",gap:7,padding:"7px 14px",
+            borderRadius:8,border:"1.5px solid #E5E7EB",background:"#fff",
+            color:"#9CA3AF",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>
+          <span>🔔</span>
+          <span>{hasReminder?"リマインダーを変更":"リマインダーを設定"}</span>
+        </button>
+      )}
+      {showPicker&&(
+        <div style={{background:"#F9F8F6",border:"1.5px solid #E5E7EB",
+          borderRadius:10,padding:"12px",marginTop:4}}>
+          <div style={{marginBottom:10}}>
+            <div style={{fontSize:10,color:"#9CA3AF",letterSpacing:"0.08em",marginBottom:5}}>日付</div>
+            <input type="date" value={rDate} onChange={e=>setRDate(e.target.value)}
+              style={{width:"100%",border:"1.5px solid #E5E7EB",borderRadius:8,
+                padding:"7px 10px",fontSize:13,fontFamily:"inherit",
+                outline:"none",background:"#fff",boxSizing:"border-box"}}/>
+          </div>
+          <div style={{marginBottom:12}}>
+            <div style={{fontSize:10,color:"#9CA3AF",letterSpacing:"0.08em",marginBottom:5}}>時間</div>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <select value={rHour} onChange={e=>setRHour(+e.target.value)}
+                style={{flex:1,border:"1.5px solid #E5E7EB",borderRadius:8,padding:"7px 8px",
+                  fontSize:13,fontFamily:"inherit",outline:"none",background:"#fff"}}>
+                {Array.from({length:19},(_,i)=>i+5).map(h=>(
+                  <option key={h} value={h}>{h}時</option>
+                ))}
+              </select>
+              <select value={rMin} onChange={e=>setRMin(+e.target.value)}
+                style={{flex:1,border:"1.5px solid #E5E7EB",borderRadius:8,padding:"7px 8px",
+                  fontSize:13,fontFamily:"inherit",outline:"none",background:"#fff"}}>
+                {Array.from({length:60},(_,i)=>i).map(m=>(
+                  <option key={m} value={m}>{String(m).padStart(2,"0")}分</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={save}
+              style={{flex:1,background:"#1C1C1E",color:"#fff",border:"none",
+                borderRadius:8,padding:"9px",fontSize:13,fontWeight:700,
+                cursor:"pointer",fontFamily:"inherit"}}>設定</button>
+            <button onClick={()=>setShowPicker(false)}
+              style={{background:"transparent",border:"1.5px solid #E5E7EB",
+                borderRadius:8,padding:"9px 14px",fontSize:13,color:"#9CA3AF",
+                cursor:"pointer",fontFamily:"inherit"}}>キャンセル</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function scheduleReminder(taskId, label, date, hour, min) {
+  const key = "reminder_"+taskId;
+  localStorage.setItem(key, JSON.stringify({taskId,label,date,hour,min}));
+}
+
+// リマインダーチェッカー（App内useEffectで呼ぶ）
+function checkReminders(tasks) {
+  if(!("Notification" in window) || Notification.permission!=="granted") return;
+  const now = new Date();
+  const nowDate = now.toISOString().slice(0,10);
+  const nowHour = now.getHours();
+  const nowMin  = now.getMinutes();
+  tasks.forEach(t=>{
+    if(!t.reminderSet||!t.reminderDate||t.done) return;
+    if(t.reminderDate!==nowDate) return;
+    if(t.reminderHour!==nowHour||t.reminderMin!==nowMin) return;
+    const firedKey="reminder_fired_"+t.id+"_"+nowDate+"_"+nowHour+"_"+nowMin;
+    if(localStorage.getItem(firedKey)) return;
+    new Notification("🔔 リマインダー",{
+      body:t.text,icon:"./icon.png",tag:"reminder_"+t.id,
+    });
+    localStorage.setItem(firedKey,"1");
+  });
 }
 
 // ── HabitModal ─────────────────────────────────────────────────
