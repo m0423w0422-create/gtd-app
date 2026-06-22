@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#F9F8F6" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="GTDタスク" />
@@ -64,7 +67,17 @@ const daysUntil = s => {
 };
 const makeTask = (o={}) => ({
   id:gid(),text:"",category:"inbox",done:false,
-  createdAt:Date.now(),doneAt:null,dueDate:null,memo:"",
+  createdAt:Date.now(),doneAt:null,memo:"",
+  taskType:"task", // "task"|"schedule"|"case"
+  // タスク用
+  taskDate:null, taskHour:9, taskMin:0,
+  // 予定用
+  schedStartDate:null, schedStartHour:10, schedStartMin:0,
+  schedEndHour:11, schedEndMin:0,
+  // 案件用
+  caseDate:todayStr(), // 発生日
+  nextAction:"", nextActionDate:null, nextActionHour:9, nextActionMin:0,
+  // 共通
   contexts:[],projectId:null,
   phoneTo:"",phoneNumber:"",phoneNote:"",
   reminderSet:false,reminderDate:null,reminderHour:null,reminderMin:null,
@@ -77,7 +90,22 @@ const makeHabit = (o={}) => ({id:gid(),text:"",category:"work",days:[1,2,3,4,5],
 const load = (k,fb) => {try{const v=localStorage.getItem(k);return v?JSON.parse(v):fb}catch{return fb}};
 const save = (k,v) => {try{localStorage.setItem(k,JSON.stringify(v))}catch{}};
 const migrateProjects = ps => ps.map(p=>({category:"work",collapsed:false,...p}));
-const migrateTasks = ts => ts.map(t=>({doneAt:null,contexts:t.contexts||[],phoneTo:"",phoneNumber:"",phoneNote:"",reminderSet:false,reminderDate:null,reminderHour:null,reminderMin:null,...t}));
+const migrateTasks = ts => ts.map(t=>({
+  doneAt:null,contexts:t.contexts||[],
+  taskType:t.taskType||"task",
+  taskDate:t.taskDate||t.dueDate||null,
+  taskHour:t.taskHour||9, taskMin:t.taskMin||0,
+  schedStartDate:t.schedStartDate||t.dueDate||null,
+  schedStartHour:t.schedStartHour||10, schedStartMin:t.schedStartMin||0,
+  schedEndHour:t.schedEndHour||11, schedEndMin:t.schedEndMin||0,
+  caseDate:t.caseDate||todayStr(),
+  nextAction:t.nextAction||"", nextActionDate:t.nextActionDate||null,
+  nextActionHour:t.nextActionHour||9, nextActionMin:t.nextActionMin||0,
+  phoneTo:t.phoneTo||"",phoneNumber:t.phoneNumber||"",phoneNote:t.phoneNote||"",
+  reminderSet:t.reminderSet||false,reminderDate:t.reminderDate||null,
+  reminderHour:t.reminderHour||null,reminderMin:t.reminderMin||null,
+  ...t
+}));
 
 // ── Defaults ───────────────────────────────────────────────────
 const DEF_TASKS = () => [
@@ -966,9 +994,7 @@ function TaskRow({task,tasks,projects,openPanel,setOpenPanel,upd,del,togCtx,comp
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:compact?13:14,lineHeight:1.5,
             display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
-            {task.isNextAction&&<span style={{fontSize:11,color:"#F59E0B"}}>⚡</span>}
-            {!task.clarified&&<span style={{fontSize:10,color:"#EF4444",
-              background:"#FEF2F2",borderRadius:4,padding:"1px 5px"}}>未仕分け</span>}
+
             <span>{task.text}</span>
             {task.category==="inbox"&&!task.done&&(Date.now()-task.createdAt)>86400000&&(
               <span style={{fontSize:9,fontWeight:700,color:"#EF4444",
@@ -994,7 +1020,15 @@ function TaskRow({task,tasks,projects,openPanel,setOpenPanel,upd,del,togCtx,comp
           )}
         </div>
         <div style={{display:"flex",alignItems:"center",gap:5,flexShrink:0}}>
-          <DueBadge dueDate={task.dueDate}/>
+          <DueBadge dueDate={task.taskType==="schedule"?task.schedStartDate:task.taskType==="case"?null:task.taskDate}/>
+          {task.taskType&&task.taskType!=="task"&&(
+            <span style={{fontSize:9,fontWeight:700,
+              color:task.taskType==="schedule"?"#2563EB":"#9333EA",
+              background:task.taskType==="schedule"?"#EFF6FF":"#F5F3FF",
+              borderRadius:4,padding:"1px 5px",flexShrink:0}}>
+              {task.taskType==="schedule"?"予定":"案件"}
+            </span>
+          )}
           {!compact&&<span style={{fontSize:10,fontWeight:600,color:CATEGORIES[task.category].color,
             background:CATEGORIES[task.category].color+"18",borderRadius:5,padding:"2px 7px"}}>
             {CATEGORIES[task.category].icon} {CATEGORIES[task.category].label}
@@ -1009,6 +1043,9 @@ function TaskRow({task,tasks,projects,openPanel,setOpenPanel,upd,del,togCtx,comp
         <div style={{background:"#fff",border:"1.5px solid #1C1C1E",
           borderTop:"1px solid #F3F4F6",borderRadius:"0 0 11px 11px",
           padding:"14px 15px",marginBottom:compact?6:8}}>
+
+          {/* 種別 */}
+          <TaskTypeSection task={task} upd={upd}/>
 
           {/* 電話 */}
           <div style={{marginBottom:13}}>
@@ -1072,28 +1109,7 @@ function TaskRow({task,tasks,projects,openPanel,setOpenPanel,upd,del,togCtx,comp
           {/* リマインダー */}
           <ReminderSection task={task} upd={upd}/>
 
-          {/* Due date */}
-          <div style={{marginBottom:13}}>
-            <SL>期日</SL>
-            <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-              {[{l:"今日",v:offD(0)},{l:"明日",v:offD(1)},{l:"3日後",v:offD(3)},{l:"1週間後",v:offD(7)}].map(s=>(
-                <button key={s.l} onClick={()=>upd(task.id,{dueDate:s.v})}
-                  style={{padding:"5px 11px",borderRadius:7,border:"1.5px solid",
-                    borderColor:task.dueDate===s.v?"#1C1C1E":"#E5E7EB",
-                    background:task.dueDate===s.v?"#1C1C1E":"#fff",
-                    color:task.dueDate===s.v?"#fff":"#6B7280",
-                    fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{s.l}</button>
-              ))}
-              <input type="date" value={task.dueDate||""}
-                onChange={e=>upd(task.id,{dueDate:e.target.value||null})}
-                style={{border:"1.5px solid #E5E7EB",borderRadius:7,padding:"5px 9px",
-                  fontSize:12,fontFamily:"inherit",color:"#1C1C1E",
-                  background:"#fff",outline:"none",cursor:"pointer"}}/>
-              {task.dueDate&&<button onClick={()=>upd(task.id,{dueDate:null})}
-                style={{background:"transparent",border:"none",color:"#9CA3AF",
-                  fontSize:13,cursor:"pointer"}}>✕</button>}
-            </div>
-          </div>
+
 
           {/* Project */}
           <div style={{marginBottom:13}}>
@@ -1162,24 +1178,46 @@ function DailySchedule({tasks, completeTask, upd}) {
   const [taskQuery,setTaskQuery]= useState("");
 
   useEffect(()=>{
-    setEntries(load("gtd_timeline_"+schedDate,[]));
-    setDayMemo(load("gtd_daymemo_"+schedDate,""));
+    const tl = load("gtd_timeline_"+schedDate,[]);
+    const dm = load("gtd_daymemo_"+schedDate,"");
+    setEntries(Array.isArray(tl)?tl:[]);
+    setDayMemo(typeof dm==="string"?dm:"");
   },[schedDate]);
-  useEffect(()=>{ save("gtd_timeline_"+schedDate, entries); },[entries,schedDate]);
+  useEffect(()=>{ if(Array.isArray(entries)) save("gtd_timeline_"+schedDate, entries); },[entries,schedDate]);
   useEffect(()=>{ save("gtd_daymemo_"+schedDate, dayMemo);  },[dayMemo,schedDate]);
 
   // 通知許可を取得
   useEffect(()=>{
     if("Notification" in window && Notification.permission==="default"){
-      Notification.requestPermission();
+      Notification.requestPermission().then(p=>{
+        if(p==="granted") console.log("通知許可されました");
+      });
     }
   },[]);
 
-  // リマインダーチェック（1分ごと）
+  // リマインダーチェック（30秒ごと）＋SWとWorkerにタスクデータを送信
   useEffect(()=>{
+    const sendToSW = () => {
+      if(navigator.serviceWorker && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: "REMINDER_DATA",
+          tasks: tasks,
+        });
+      }
+    };
+    sendToSW();
     checkReminders(tasks);
-    const t=setInterval(()=>checkReminders(tasks),60000);
-    return ()=>clearInterval(t);
+    // Workerにリマインダーデータを同期
+    syncRemindersToWorker(tasks);
+    const t = setInterval(()=>{
+      sendToSW();
+      checkReminders(tasks);
+    }, 30000);
+    // 5分ごとにWorkerに同期
+    const t2 = setInterval(()=>{
+      syncRemindersToWorker(tasks);
+    }, 300000);
+    return ()=>{clearInterval(t);clearInterval(t2);};
   },[tasks]);
 
   // 通知スケジューラー：1分ごとにチェック
@@ -1350,54 +1388,31 @@ function DailySchedule({tasks, completeTask, upd}) {
           {/* 時間帯選択 */}
           <div style={{marginBottom:12}}>
             <div style={{fontSize:10,color:"#9CA3AF",letterSpacing:"0.08em",marginBottom:8}}>時間帯</div>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              {/* 開始 */}
-              <div style={{display:"flex",gap:4,flex:1}}>
-                <select value={addHour} onChange={e=>{
-                    const h=+e.target.value;
-                    setAddHour(h);
-                    // 終了が開始以前なら自動調整
-                    if(h>addEndHour||(h===addEndHour&&addMin>=addEndMin)){
-                      setAddEndHour(h); setAddEndMin(addMin+30>=60?0:addMin+30);
-                      if(addMin+30>=60) setAddEndHour(h+1);
-                    }
-                  }}
-                  style={{flex:1,border:"1.5px solid #E5E7EB",borderRadius:8,padding:"8px 6px",
-                    fontSize:13,fontFamily:"inherit",outline:"none",background:"#fff",color:"#1C1C1E",
-                    textAlign:"center"}}>
-                  {Array.from({length:19},(_,i)=>i+5).map(h=>(
-                    <option key={h} value={h}>{h}:00</option>
-                  ))}
-                </select>
-                <select value={addMin} onChange={e=>setAddMin(+e.target.value)}
-                  style={{width:62,border:"1.5px solid #E5E7EB",borderRadius:8,padding:"8px 4px",
-                    fontSize:13,fontFamily:"inherit",outline:"none",background:"#fff",color:"#1C1C1E",
-                    textAlign:"center"}}>
-                  {[0,15,30,45].map(m=>(
-                    <option key={m} value={m}>{String(m).padStart(2,"0")}</option>
-                  ))}
-                </select>
-              </div>
-              <span style={{color:"#9CA3AF",fontSize:14,flexShrink:0}}>〜</span>
-              {/* 終了 */}
-              <div style={{display:"flex",gap:4,flex:1}}>
-                <select value={addEndHour} onChange={e=>setAddEndHour(+e.target.value)}
-                  style={{flex:1,border:"1.5px solid #E5E7EB",borderRadius:8,padding:"8px 6px",
-                    fontSize:13,fontFamily:"inherit",outline:"none",background:"#fff",color:"#1C1C1E",
-                    textAlign:"center"}}>
-                  {Array.from({length:19},(_,i)=>i+5).map(h=>(
-                    <option key={h} value={h}>{h}:00</option>
-                  ))}
-                </select>
-                <select value={addEndMin} onChange={e=>setAddEndMin(+e.target.value)}
-                  style={{width:62,border:"1.5px solid #E5E7EB",borderRadius:8,padding:"8px 4px",
-                    fontSize:13,fontFamily:"inherit",outline:"none",background:"#fff",color:"#1C1C1E",
-                    textAlign:"center"}}>
-                  {[0,15,30,45].map(m=>(
-                    <option key={m} value={m}>{String(m).padStart(2,"0")}</option>
-                  ))}
-                </select>
-              </div>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <input type="time"
+                value={`${String(addHour).padStart(2,"0")}:${String(addMin).padStart(2,"0")}`}
+                onChange={e=>{
+                  const [h,m]=e.target.value.split(":");
+                  const nh=+h,nm=+m;
+                  setAddHour(nh); setAddMin(nm);
+                  if(nh>addEndHour||(nh===addEndHour&&nm>=addEndMin)){
+                    const endM=nm+60>=60?nm:nm+60;
+                    setAddEndHour(nh+1); setAddEndMin(nm);
+                  }
+                }}
+                style={{flex:1,border:"1.5px solid #E5E7EB",borderRadius:8,
+                  padding:"10px 8px",fontSize:17,fontFamily:"inherit",
+                  outline:"none",background:"#fff",color:"#1C1C1E"}}/>
+              <span style={{color:"#9CA3AF",fontSize:16,flexShrink:0}}>〜</span>
+              <input type="time"
+                value={`${String(addEndHour).padStart(2,"0")}:${String(addEndMin).padStart(2,"0")}`}
+                onChange={e=>{
+                  const [h,m]=e.target.value.split(":");
+                  setAddEndHour(+h); setAddEndMin(+m);
+                }}
+                style={{flex:1,border:"1.5px solid #E5E7EB",borderRadius:8,
+                  padding:"10px 8px",fontSize:17,fontFamily:"inherit",
+                  outline:"none",background:"#fff",color:"#1C1C1E"}}/>
             </div>
           </div>
 
@@ -1612,7 +1627,7 @@ function DailySchedule({tasks, completeTask, upd}) {
                         🔔 {t.reminderHour}:{String(t.reminderMin).padStart(2,"0")}
                       </span>
                     )}
-                    <DueBadge dueDate={t.dueDate}/>
+                    <DueBadge dueDate={t.taskType==="schedule"?t.schedStartDate:t.taskType==="case"?null:t.taskDate}/>
                   </div>
                 </div>
               </div>
@@ -1664,7 +1679,7 @@ function CalSummaryBlock({label, count, tasks, color}) {
                 overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                 {t.text}
               </span>
-              <DueBadge dueDate={t.dueDate}/>
+              <DueBadge dueDate={t.taskType==="schedule"?t.schedStartDate:t.taskType==="case"?null:t.taskDate}/>
             </div>
           ))}
         </div>
@@ -1694,10 +1709,12 @@ function CalendarView({tasks, onSelectDate, selectedDate}) {
 
   // 期日ごとのタスクマップ
   const tasksByDate = {};
+  const getTaskDate = t => t.taskType==="schedule" ? t.schedStartDate : t.taskType==="case" ? null : t.taskDate;
   tasks.forEach(t => {
-    if(!t.dueDate || t.done) return;
-    if(!tasksByDate[t.dueDate]) tasksByDate[t.dueDate] = [];
-    tasksByDate[t.dueDate].push(t);
+    const d = getTaskDate(t);
+    if(!d || t.done) return;
+    if(!tasksByDate[d]) tasksByDate[d] = [];
+    tasksByDate[d].push(t);
   });
 
   const dateStr = d => `${curYear}-${String(curMonth+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
@@ -1798,7 +1815,7 @@ function CalendarView({tasks, onSelectDate, selectedDate}) {
                     borderRadius:4,padding:"1px 6px"}}>
                     {CATEGORIES[t.category].icon} {CATEGORIES[t.category].label}
                   </span>
-                  <DueBadge dueDate={t.dueDate}/>
+                  <DueBadge dueDate={t.taskType==="schedule"?t.schedStartDate:t.taskType==="case"?null:t.taskDate}/>
                 </div>
               </div>
             </div>
@@ -1809,8 +1826,9 @@ function CalendarView({tasks, onSelectDate, selectedDate}) {
       {/* 今月の期日サマリー（折りたたみ） */}
       {(()=>{
         const prefix = `${curYear}-${String(curMonth+1).padStart(2,"0")}`;
-        const monthTasks = tasks.filter(t=>!t.done&&t.dueDate&&t.dueDate.startsWith(prefix));
-        const overdueTasks = monthTasks.filter(t=>daysUntil(t.dueDate)<0);
+        const getD = t => t.taskType==="schedule"?t.schedStartDate:t.taskType==="case"?null:t.taskDate;
+        const monthTasks = tasks.filter(t=>!t.done&&getD(t)&&getD(t).startsWith(prefix));
+        const overdueTasks = monthTasks.filter(t=>daysUntil(getD(t))<0);
         if(monthTasks.length===0) return null;
         return (
           <div style={{marginTop:16}}>
@@ -1829,6 +1847,198 @@ function CalendarView({tasks, onSelectDate, selectedDate}) {
   );
 }
 
+
+
+// ── TaskTypeSection ─────────────────────────────────────────────
+function TaskTypeSection({task, upd}) {
+  const TYPES = [
+    {key:"task",     label:"タスク",  icon:"✅"},
+    {key:"schedule", label:"予定",    icon:"📅"},
+    {key:"case",     label:"案件",    icon:"📋"},
+  ];
+
+  const setType = (t) => upd(task.id, {taskType:t});
+
+  // タスク・予定の日時設定時にTodayタイムラインへ自動追加
+  const addToTimeline = (date, hour, min, endHour, endMin, label) => {
+    if(!date) return;
+    const tlKey = "gtd_timeline_"+date;
+    const tl = JSON.parse(localStorage.getItem(tlKey)||"[]");
+    const exists = tl.some(e=>e.taskId===task.id);
+    if(!exists) {
+      tl.push({
+        id: Date.now().toString(36)+Math.random().toString(36).slice(2,4),
+        type:"task", taskId:task.id, label:label||task.text,
+        hour, minute:min,
+        endHour:endHour||hour+1, endMin:endMin||min,
+        color: CATEGORIES[task.category]?.color||"#6B7280",
+        category: task.category,
+      });
+      localStorage.setItem(tlKey, JSON.stringify(tl));
+    }
+  };
+
+  // リマインダー自動設定
+  const setAutoReminder = (date, hour, min) => {
+    if(!date) return;
+    upd(task.id, {reminderSet:true, reminderDate:date, reminderHour:hour, reminderMin:min});
+  };
+
+  const t = task;
+
+  return (
+    <div style={{marginBottom:16}}>
+      <SL>種別</SL>
+      {/* 種別ボタン */}
+      <div style={{display:"flex",gap:6,marginBottom:12}}>
+        {TYPES.map(tp=>(
+          <button key={tp.key} onClick={()=>setType(tp.key)}
+            style={{flex:1,padding:"8px 4px",borderRadius:9,border:"1.5px solid",
+              borderColor:t.taskType===tp.key?"#1C1C1E":"#E5E7EB",
+              background:t.taskType===tp.key?"#1C1C1E":"#fff",
+              color:t.taskType===tp.key?"#fff":"#9CA3AF",
+              fontSize:12,fontWeight:t.taskType===tp.key?700:500,
+              cursor:"pointer",fontFamily:"inherit",
+              display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+            <span style={{fontSize:15}}>{tp.icon}</span>
+            <span>{tp.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* タスク：日付＋時間 */}
+      {t.taskType==="task"&&(
+        <div style={{background:"#F9F8F6",borderRadius:10,padding:"10px 12px"}}>
+          <div style={{fontSize:10,color:"#9CA3AF",letterSpacing:"0.06em",marginBottom:7}}>日時</div>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            <input type="date" value={t.taskDate||""}
+              onChange={e=>{
+                upd(task.id,{taskDate:e.target.value||null});
+              }}
+              style={{flex:1,border:"1.5px solid #E5E7EB",borderRadius:8,
+                padding:"8px 10px",fontSize:13,fontFamily:"inherit",
+                outline:"none",background:"#fff",color:"#1C1C1E"}}/>
+            <input type="time"
+              value={`${String(t.taskHour||9).padStart(2,"0")}:${String(t.taskMin||0).padStart(2,"0")}`}
+              onChange={e=>{
+                const [h,m]=e.target.value.split(":");
+                upd(task.id,{taskHour:+h,taskMin:+m});
+              }}
+              style={{flex:1,border:"1.5px solid #E5E7EB",borderRadius:8,
+                padding:"8px 10px",fontSize:16,fontFamily:"inherit",
+                outline:"none",background:"#fff",color:"#1C1C1E"}}/>
+          </div>
+          {t.taskDate&&(
+            <button onClick={()=>{
+                addToTimeline(t.taskDate,t.taskHour||9,t.taskMin||0,null,null,t.text);
+                setAutoReminder(t.taskDate,t.taskHour||9,t.taskMin||0);
+                alert("Todayのタイムラインに追加し、リマインダーを設定しました");
+              }}
+              style={{marginTop:8,width:"100%",padding:"8px",borderRadius:8,
+                border:"none",background:"#1C1C1E",color:"#fff",
+                fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+              Todayに追加＋リマインダー設定
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* 予定：日付＋開始〜終了時間 */}
+      {t.taskType==="schedule"&&(
+        <div style={{background:"#F9F8F6",borderRadius:10,padding:"10px 12px"}}>
+          <div style={{fontSize:10,color:"#9CA3AF",letterSpacing:"0.06em",marginBottom:7}}>日時</div>
+          <input type="date" value={t.schedStartDate||""}
+            onChange={e=>upd(task.id,{schedStartDate:e.target.value||null})}
+            style={{width:"100%",boxSizing:"border-box",border:"1.5px solid #E5E7EB",borderRadius:8,
+              padding:"8px 10px",fontSize:13,fontFamily:"inherit",
+              outline:"none",background:"#fff",color:"#1C1C1E",marginBottom:8}}/>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <input type="time"
+              value={`${String(t.schedStartHour||10).padStart(2,"0")}:${String(t.schedStartMin||0).padStart(2,"0")}`}
+              onChange={e=>{const [h,m]=e.target.value.split(":");upd(task.id,{schedStartHour:+h,schedStartMin:+m});}}
+              style={{flex:1,border:"1.5px solid #E5E7EB",borderRadius:8,
+                padding:"8px 8px",fontSize:16,fontFamily:"inherit",
+                outline:"none",background:"#fff",color:"#1C1C1E"}}/>
+            <span style={{color:"#9CA3AF",flexShrink:0}}>〜</span>
+            <input type="time"
+              value={`${String(t.schedEndHour||11).padStart(2,"0")}:${String(t.schedEndMin||0).padStart(2,"0")}`}
+              onChange={e=>{const [h,m]=e.target.value.split(":");upd(task.id,{schedEndHour:+h,schedEndMin:+m});}}
+              style={{flex:1,border:"1.5px solid #E5E7EB",borderRadius:8,
+                padding:"8px 8px",fontSize:16,fontFamily:"inherit",
+                outline:"none",background:"#fff",color:"#1C1C1E"}}/>
+          </div>
+          {t.schedStartDate&&(
+            <button onClick={()=>{
+                addToTimeline(t.schedStartDate,t.schedStartHour||10,t.schedStartMin||0,t.schedEndHour||11,t.schedEndMin||0,t.text);
+                setAutoReminder(t.schedStartDate,t.schedStartHour||10,t.schedStartMin||0);
+                alert("Todayのタイムラインに追加し、リマインダーを設定しました");
+              }}
+              style={{marginTop:8,width:"100%",padding:"8px",borderRadius:8,
+                border:"none",background:"#1C1C1E",color:"#fff",
+                fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+              Todayに追加＋リマインダー設定
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* 案件：発生日＋次のアクション＋日時 */}
+      {t.taskType==="case"&&(
+        <div style={{background:"#F9F8F6",borderRadius:10,padding:"10px 12px"}}>
+          <div style={{marginBottom:10}}>
+            <div style={{fontSize:10,color:"#9CA3AF",letterSpacing:"0.06em",marginBottom:6}}>発生日</div>
+            <input type="date" value={t.caseDate||todayStr()}
+              onChange={e=>upd(task.id,{caseDate:e.target.value||todayStr()})}
+              style={{width:"100%",boxSizing:"border-box",border:"1.5px solid #E5E7EB",borderRadius:8,
+                padding:"8px 10px",fontSize:13,fontFamily:"inherit",
+                outline:"none",background:"#fff",color:"#1C1C1E"}}/>
+          </div>
+          <div style={{marginBottom:10}}>
+            <div style={{fontSize:10,color:"#9CA3AF",letterSpacing:"0.06em",marginBottom:6}}>次のアクション</div>
+            <input value={t.nextAction||""}
+              onChange={e=>upd(task.id,{nextAction:e.target.value})}
+              placeholder="例：契約書を確認して返送する"
+              style={{width:"100%",boxSizing:"border-box",border:"1.5px solid #E5E7EB",borderRadius:8,
+                padding:"8px 10px",fontSize:13,fontFamily:"inherit",color:"#1C1C1E",
+                background:"#fff",outline:"none"}}
+              onFocus={e=>e.target.style.borderColor="#1C1C1E"}
+              onBlur={e=>e.target.style.borderColor="#E5E7EB"}/>
+          </div>
+          <div>
+            <div style={{fontSize:10,color:"#9CA3AF",letterSpacing:"0.06em",marginBottom:6}}>アクション日時</div>
+            <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+              <input type="date" value={t.nextActionDate||""}
+                onChange={e=>upd(task.id,{nextActionDate:e.target.value||null})}
+                style={{flex:1,border:"1.5px solid #E5E7EB",borderRadius:8,
+                  padding:"8px 8px",fontSize:13,fontFamily:"inherit",
+                  outline:"none",background:"#fff",color:"#1C1C1E"}}/>
+              <input type="time"
+                value={`${String(t.nextActionHour||9).padStart(2,"0")}:${String(t.nextActionMin||0).padStart(2,"0")}`}
+                onChange={e=>{
+                  const [h,m]=e.target.value.split(":");
+                  upd(task.id,{nextActionHour:+h,nextActionMin:+m});
+                }}
+                style={{flex:1,border:"1.5px solid #E5E7EB",borderRadius:8,
+                  padding:"8px 8px",fontSize:16,fontFamily:"inherit",
+                  outline:"none",background:"#fff",color:"#1C1C1E"}}/>
+            </div>
+            {t.nextActionDate&&(
+              <button onClick={()=>{
+                  setAutoReminder(t.nextActionDate,t.nextActionHour||9,t.nextActionMin||0);
+                  alert("アクション日時にリマインダーを設定しました");
+                }}
+                style={{marginTop:8,width:"100%",padding:"8px",borderRadius:8,
+                  border:"none",background:"#2563EB",color:"#fff",
+                  fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                🔔 この日時にリマインダーを設定
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── ReminderSection ────────────────────────────────────────────
 function ReminderSection({task, upd}) {
@@ -1894,22 +2104,16 @@ function ReminderSection({task, upd}) {
           </div>
           <div style={{marginBottom:12}}>
             <div style={{fontSize:10,color:"#9CA3AF",letterSpacing:"0.08em",marginBottom:5}}>時間</div>
-            <div style={{display:"flex",gap:8,alignItems:"center"}}>
-              <select value={rHour} onChange={e=>setRHour(+e.target.value)}
-                style={{flex:1,border:"1.5px solid #E5E7EB",borderRadius:8,padding:"7px 8px",
-                  fontSize:13,fontFamily:"inherit",outline:"none",background:"#fff"}}>
-                {Array.from({length:19},(_,i)=>i+5).map(h=>(
-                  <option key={h} value={h}>{h}時</option>
-                ))}
-              </select>
-              <select value={rMin} onChange={e=>setRMin(+e.target.value)}
-                style={{flex:1,border:"1.5px solid #E5E7EB",borderRadius:8,padding:"7px 8px",
-                  fontSize:13,fontFamily:"inherit",outline:"none",background:"#fff"}}>
-                {Array.from({length:60},(_,i)=>i).map(m=>(
-                  <option key={m} value={m}>{String(m).padStart(2,"0")}分</option>
-                ))}
-              </select>
-            </div>
+            <input type="time"
+              value={`${String(rHour).padStart(2,"0")}:${String(rMin).padStart(2,"0")}`}
+              onChange={e=>{
+                const [h,m]=e.target.value.split(":");
+                setRHour(+h); setRMin(+m);
+              }}
+              style={{width:"100%",border:"1.5px solid #E5E7EB",borderRadius:8,
+                padding:"10px 12px",fontSize:18,fontFamily:"inherit",
+                outline:"none",background:"#fff",boxSizing:"border-box",
+                color:"#1C1C1E"}}/>
           </div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={save}
@@ -1933,22 +2137,104 @@ function scheduleReminder(taskId, label, date, hour, min) {
 }
 
 // リマインダーチェッカー（App内useEffectで呼ぶ）
+const NTFY_TOPIC = "hikari-gtd";
+const WORKER_URL = "https://gtd-reminder-worker.m0423-w0422.workers.dev";
+
+async function sendNtfy(title, body, tag) {
+  try {
+    await fetch("https://ntfy.sh/" + NTFY_TOPIC, {
+      method: "POST",
+      headers: {
+        "Title": encodeURIComponent(title),
+        "Priority": "high",
+        "Tags": tag || "bell",
+        "Content-Type": "text/plain; charset=utf-8",
+      },
+      body: body,
+    });
+  } catch(e) {}
+}
+
+// Workerにリマインダーデータを送信（バックグラウンド通知用）
+async function syncRemindersToWorker(tasks) {
+  try {
+    const reminders = tasks.filter(t =>
+      !t.done && (
+        (t.reminderSet && t.reminderDate) ||
+        (t.taskType === "case" && t.nextActionDate)
+      )
+    );
+    await fetch(WORKER_URL + "/save", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(reminders),
+    });
+  } catch(e) {}
+}
+
 function checkReminders(tasks) {
-  if(!("Notification" in window) || Notification.permission!=="granted") return;
   const now = new Date();
   const nowDate = now.toISOString().slice(0,10);
   const nowHour = now.getHours();
   const nowMin  = now.getMinutes();
-  tasks.forEach(t=>{
-    if(!t.reminderSet||!t.reminderDate||t.done) return;
-    if(t.reminderDate!==nowDate) return;
-    if(t.reminderHour!==nowHour||t.reminderMin!==nowMin) return;
-    const firedKey="reminder_fired_"+t.id+"_"+nowDate+"_"+nowHour+"_"+nowMin;
-    if(localStorage.getItem(firedKey)) return;
-    new Notification("🔔 リマインダー",{
-      body:t.text,icon:"./icon.png",tag:"reminder_"+t.id,
-    });
-    localStorage.setItem(firedKey,"1");
+
+  tasks.forEach(t => {
+    if(t.done) return;
+
+    // 通常リマインダー
+    if(t.reminderSet && t.reminderDate) {
+      if(t.reminderDate===nowDate && t.reminderHour===nowHour && t.reminderMin===nowMin) {
+        const key = "nf_"+t.id+"_"+nowDate+"_"+nowHour+"_"+nowMin;
+        if(!localStorage.getItem(key)) {
+          // ntfy.shで通知（iPhone/Android両対応）
+          sendNtfy(
+            "🔔 " + t.text,
+            String(t.reminderHour).padStart(2,"0")+":"+String(t.reminderMin).padStart(2,"0") + " のリマインダーです",
+            "bell"
+          );
+          // ブラウザ通知（アプリが開いている場合）
+          if("Notification" in window && Notification.permission==="granted") {
+            try {
+              new Notification("🔔 "+t.text, {
+                body: String(t.reminderHour).padStart(2,"0")+":"+String(t.reminderMin).padStart(2,"0"),
+                icon:"./icon.png", tag:"reminder_"+t.id, requireInteraction:true,
+              });
+            } catch(e) {}
+          }
+          // SW経由でも通知
+          if(navigator.serviceWorker && navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({
+              type: "REMINDER_DATA", tasks: tasks,
+            });
+          }
+          localStorage.setItem(key,"1");
+        }
+      }
+    }
+
+    // 案件のアクション日時
+    if(t.taskType==="case" && t.nextActionDate) {
+      const h=t.nextActionHour||9, m=t.nextActionMin||0;
+      if(t.nextActionDate===nowDate && h===nowHour && m===nowMin) {
+        const key="nf_case_"+t.id+"_"+nowDate+"_"+h+"_"+m;
+        if(!localStorage.getItem(key)) {
+          sendNtfy(
+            "📋 案件: " + t.text,
+            t.nextAction || "次のアクションの時間です",
+            "spiral_notepad"
+          );
+          if("Notification" in window && Notification.permission==="granted") {
+            try {
+              new Notification("📋 案件: "+t.text, {
+                body: t.nextAction||"次のアクションの時間です",
+                icon:"./icon.png", tag:"case_"+t.id, requireInteraction:true,
+              });
+            } catch(e) {}
+          }
+          localStorage.setItem(key,"1");
+        }
+      }
+    }
   });
 }
 
@@ -2038,7 +2324,47 @@ function HabitModal({habit,onSave,onDelete,onClose}) {
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
-if("serviceWorker" in navigator) navigator.serviceWorker.register("./sw.js").catch(()=>{});
+if("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("./sw.js").then(reg => {
+    // 新しいSWが待機中なら即座に有効化
+    if(reg.waiting) reg.waiting.postMessage({type:"SKIP_WAITING"});
+    reg.addEventListener("updatefound", () => {
+      const newSW = reg.installing;
+      if(newSW) {
+        newSW.addEventListener("statechange", () => {
+          if(newSW.state === "installed" && navigator.serviceWorker.controller) {
+            // 新バージョン検出時にページをリロード
+            window.location.reload();
+          }
+        });
+      }
+    });
+    console.log("SW registered");
+    // Periodic Syncの登録（対応ブラウザのみ）
+    if("periodicSync" in reg) {
+      navigator.permissions.query({name:"periodic-background-sync"}).then(status => {
+        if(status.state === "granted") {
+          reg.periodicSync.register("reminder-check", {minInterval: 60000}).catch(()=>{});
+        }
+      }).catch(()=>{});
+    }
+  }).catch(()=>{});
+
+  // SWからのCHECK_REMINDERSメッセージを受け取ったらタスクを送り返す
+  navigator.serviceWorker.addEventListener("message", e => {
+    if(e.data && e.data.type === "CHECK_REMINDERS") {
+      try {
+        const tasks = JSON.parse(localStorage.getItem("gtd_tasks") || "[]");
+        if(navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage({
+            type: "REMINDER_DATA",
+            tasks: tasks,
+          });
+        }
+      } catch(err) {}
+    }
+  });
+}
 </script>
 </body>
 </html>
