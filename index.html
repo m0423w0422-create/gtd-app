@@ -2163,15 +2163,16 @@ async function sendNtfy(title, body, tag) {
 // 単一タスクのリマインダーをWorkerに即座に送信
 async function syncSingleReminderToWorker(task) {
   try {
-    // 既存データを取得してマージ
-    const res = await fetch(WORKER_URL + "/load").catch(()=>null);
-    let existing = [];
-    if(res && res.ok) {
-      const d = await res.json().catch(()=>({reminders:[]}));
-      existing = d.reminders || [];
-    }
-    // 既存から同じIDを除いて新しいものを追加
-    const merged = existing.filter(r=>r.id!==task.id);
+    // 全タスクからリマインダー対象を取得してWorkerに送信
+    const tasks = JSON.parse(localStorage.getItem("gtd_tasks") || "[]");
+    const reminders = tasks.filter(t =>
+      !t.done && (
+        (t.reminderSet && t.reminderDate) ||
+        (t.taskType === "case" && t.nextActionDate)
+      )
+    );
+    // 更新されたタスクをマージ
+    const merged = reminders.filter(r=>r.id!==task.id);
     merged.push(task);
     await fetch(WORKER_URL + "/save", {
       method: "POST",
